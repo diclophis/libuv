@@ -40,6 +40,8 @@ if SUNOS
 libuv_la_CFLAGS += -pthreads
 endif
 
+libuv_la_LDFLAGS += -lutil
+
 if WINNT
 
 include_HEADERS += include/uv-win.h include/tree.h

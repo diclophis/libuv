@@ -33,6 +33,8 @@
 #include <fcntl.h>
 #include <poll.h>
 
+#include <pty.h>
+
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
 # include <crt_externs.h>
 # define environ (*_NSGetEnviron())
@@ -286,8 +288,15 @@ static void uv__process_child_init(const uv_process_options_t* options,
   int fd;
   int n;
 
-  if (options->flags & UV_PROCESS_DETACHED)
+  if (1 || (options->flags & UV_PROCESS_DETACHED))
     setsid();
+
+  if (1) {
+    if (ioctl(pipes[fd][1], TIOCSCTTY, NULL) < 0) {
+      uv__write_int(error_fd, -errno);
+      _exit(127);
+    }
+  }
 
   /* First duplicate low numbered fds, since it's not safe to duplicate them,
    * they could get replaced. Example: swapping stdout and stderr; without
@@ -428,6 +437,7 @@ int uv_spawn(uv_loop_t* loop,
   int exec_errorno;
   int i;
   int status;
+  int ms, sl;
 
   assert(options->file != NULL);
   assert(!(options->flags & ~(UV_PROCESS_DETACHED |
@@ -456,11 +466,27 @@ int uv_spawn(uv_loop_t* loop,
     pipes[i][1] = -1;
   }
 
+///TODO: figure out what this was needed for...
+/*
   for (i = 0; i < options->stdio_count; i++) {
     err = uv__process_init_stdio(options->stdio + i, pipes[i]);
     if (err)
       goto error;
   }
+*/
+
+    assert(options->stdio_count == 3);
+    /* When emulating a terminal, we create a single fd pair
+     * and copy it to every slot in the 'pipes' array */
+    struct winsize wsize = {24, 80, 0, 0};
+    if (openpty(&ms, &sl, NULL, NULL, &wsize) < 0)
+      goto error;
+
+    for (i = 0; i < options->stdio_count; i++) {
+      pipes[i][0] = i ? dup(ms) : ms;
+      pipes[i][1] = i ? dup(sl) : sl;
+    }
+
 
   /* This pipe is used by the parent to wait until
    * the child has called `execve()`. We need this
